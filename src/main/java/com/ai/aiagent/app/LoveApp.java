@@ -3,6 +3,8 @@ package com.ai.aiagent.app;
 import com.ai.aiagent.advisor.MyLoggerAdvisor;
 import com.ai.aiagent.advisor.ReReadingAdvisor;
 import com.ai.aiagent.chatmemory.FileBasedChatMemory;
+import com.ai.aiagent.rag.LoveAppRagCustomAdvisorFactory;
+import com.ai.aiagent.rag.QueryRewriter;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -15,6 +17,7 @@ import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
 
@@ -95,10 +98,15 @@ public class LoveApp {
     private Advisor loveAppRagCloudAdvisor;
     @Resource
     private VectorStore pgVectorVectorStore;
+    @Resource
+    private QueryRewriter queryRewriter;
+
     public String doChatWithRag(String message,String chatId){
+        String rewrittenMessage=queryRewriter.doQueryRewrite(message);
+
         ChatResponse response=chatClient
                 .prompt()
-                .user(message)
+                .user(rewrittenMessage)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
                 // 开启日志，便于观察结果
                 .advisors(new MyLoggerAdvisor())
@@ -108,10 +116,41 @@ public class LoveApp {
 //                .advisors(loveAppRagCloudAdvisor)
                 // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
 //                .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
+                // 应用自定义的 RAG 检索增强服务（文档查询器 + 上下文增强器）
+//                .advisors(
+//                        LoveAppRagCustomAdvisorFactory.createLoveAppRagCustomAdvisor(
+//                                loveAppVectorStore,"单身"
+//                        )
+//                )
                 .call()
                 .chatResponse();
         String content=response.getResult().getOutput().getText();
         log.info("content:{}",content);
+        return content;
+    }
+    // AI 调用工具能力
+    @Resource
+    private ToolCallback[] allTools;
+
+    /**
+     * AI 恋爱报告功能（支持调用工具）
+     *
+     * @param message
+     * @param chatId
+     * @return
+     */
+    public String doChatWithTools(String message, String chatId) {
+        ChatResponse chatResponse = chatClient
+                .prompt()
+                .user(message)
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, chatId))
+                // 开启日志，便于观察效果
+                .advisors(new MyLoggerAdvisor())
+                .toolCallbacks(allTools)
+                .call()
+                .chatResponse();
+        String content = chatResponse.getResult().getOutput().getText();
+        log.info("content: {}", content);
         return content;
     }
 }
